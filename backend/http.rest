@@ -1,0 +1,8 @@
+### translate text
+POST http://localhost:1198/api/v1/translate
+Content-Type: application/json
+
+{
+    "text": "my name is ashish ranjan"
+}
+
