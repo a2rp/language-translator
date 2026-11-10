@@ -1,148 +1,210 @@
-import React, { useEffect, useState } from 'react'
-import styles from "./styles.module.scss";
-import languages from "./languages.json";
-import { FaCopy } from "react-icons/fa";
-import { GiSpeaker } from "react-icons/gi";
-import { Button, CircularProgress, Typography } from '@mui/material';
-import { FaAngleDoubleRight } from "react-icons/fa";
+import React, { useState } from 'react';
+import { Button, CircularProgress, IconButton } from '@mui/material';
+import { FaCopy } from 'react-icons/fa';
+import { GiSpeaker } from 'react-icons/gi';
+import { FaAngleDoubleRight } from 'react-icons/fa';
 import { toast } from 'react-toastify';
 import axios from 'axios';
 import CopyToClipboard from 'react-copy-to-clipboard';
+import languages from './languages.json';
+import styles from './styles.module.scss';
+
+const API_BASE_URL = (
+    process.env.REACT_APP_TRANSLATION_API_URL || 'http://localhost:1198/api/v1'
+).replace(/\/+$/, '');
+const MAX_TEXT_LENGTH = 6000;
 
 const LanguageTranslator = () => {
     const [isLoading, setIsLoading] = useState(false);
-    const [inputText, setInputText] = useState("");
-    const [outputText, setOutputText] = useState("");
-    const [selectedLanguageFrom, setSelectedLanguageFrom] = useState("en");
-    const [selectedLanguageTo, setSelectedLanguageTo] = useState("hi");
-
-    useEffect(() => {
-        // console.log(selectedLanguageFrom, "setSelectedLanguageFrom");
-    }, [selectedLanguageFrom]);
+    const [inputText, setInputText] = useState('');
+    const [outputText, setOutputText] = useState('');
+    const [selectedLanguageFrom, setSelectedLanguageFrom] = useState('en');
+    const [selectedLanguageTo, setSelectedLanguageTo] = useState('hi');
 
     const handleSubmit = async (event) => {
         event.preventDefault();
+        if (!inputText.trim()) return;
+
+        setIsLoading(true);
+        setOutputText('');
 
         try {
-            const options = {
-                url: "/translate",
-                method: "POST",
-                data: {
-                    from: selectedLanguageFrom,
-                    to: selectedLanguageTo,
-                    text: inputText
-                }
-            };
-            setIsLoading(true);
-            const response = await axios(options);
-            // console.log(response, "response rranslate");
-            if (response.data.success === true) {
+            const response = await axios.post(`${API_BASE_URL}/translate`, {
+                from: selectedLanguageFrom,
+                to: selectedLanguageTo,
+                text: inputText,
+            }, { timeout: 20000 });
+
+            if (response.data?.success && typeof response.data.translatedText === 'string') {
                 setOutputText(response.data.translatedText);
+            } else {
+                toast.error(response.data?.error || 'Translation could not be completed.');
             }
         } catch (error) {
-            // console.log(error, "error");
-            toast.error(error.message);
+            toast.error(
+                error.response?.data?.error
+                || (error.code === 'ECONNABORTED'
+                    ? 'The request timed out. Please try again.'
+                    : 'Could not reach the translation service.')
+            );
         } finally {
             setIsLoading(false);
         }
     };
 
     const readText = (place) => {
-        let utterance = "";
-        if (place === "from") {
-            utterance = new SpeechSynthesisUtterance(inputText);
-            utterance.lang = selectedLanguageFrom;
-        } else if (place === "to") {
-            utterance = new SpeechSynthesisUtterance(outputText);
-            utterance.lang = selectedLanguageTo;
+        const text = place === 'from' ? inputText : outputText;
+        const language = place === 'from' ? selectedLanguageFrom : selectedLanguageTo;
+
+        if (!text.trim()) {
+            toast.info('There is no text to read yet.');
+            return;
         }
-        speechSynthesis.speak(utterance);
+
+        if (typeof window === 'undefined' || !window.speechSynthesis || !window.SpeechSynthesisUtterance) {
+            toast.error('Speech playback is not supported in this browser.');
+            return;
+        }
+
+        window.speechSynthesis.cancel();
+        const utterance = new window.SpeechSynthesisUtterance(text);
+        utterance.lang = language;
+        window.speechSynthesis.speak(utterance);
+    };
+
+    const clearResultOnChange = (setter) => (event) => {
+        setter(event.target.value);
+        setOutputText('');
     };
 
     return (
-        <div className={styles.container}>
-            <div className={styles.main}>
-                <div className={styles.heading}>Language Translator</div>
+        <main className={styles.container}>
+            <section className={styles.main} aria-labelledby="translator-title">
+                <h1 id="translator-title" className={styles.heading}>Language Translator</h1>
                 <form onSubmit={handleSubmit} className={styles.contentSection}>
                     <div className={styles.textSection}>
                         <div className={styles.inputSection}>
+                            <label className={styles.visuallyHidden} htmlFor="source-text">Text to translate</label>
                             <textarea
+                                id="source-text"
                                 required
-                                cols="30" rows="10"
+                                maxLength={MAX_TEXT_LENGTH}
+                                rows={10}
                                 className={styles.inputTextarea}
                                 placeholder="Write something here"
                                 value={inputText}
-                                onChange={event => setInputText(event.target.value)}
-                            ></textarea>
+                                disabled={isLoading}
+                                onChange={clearResultOnChange(setInputText)}
+                            />
+                            <div className={styles.characterCount} aria-live="polite">
+                                {inputText.length}/{MAX_TEXT_LENGTH}
+                            </div>
                         </div>
                         <div className={styles.outputSection}>
+                            <label className={styles.visuallyHidden} htmlFor="translated-text">Translation</label>
                             <textarea
-                                disabled
-                                cols="30" rows="10"
+                                id="translated-text"
+                                readOnly
+                                rows={10}
                                 className={styles.outputTextarea}
                                 placeholder="Translation"
                                 value={outputText}
-                                onChange={event => setOutputText(event.target.value)}
-                            ></textarea>
+                            />
                         </div>
                     </div>
 
                     <div className={styles.controlsSection}>
                         <div className={styles.leftSection}>
-                            <Typography className={styles.fromText}>Select from language</Typography>
+                            <label className={styles.fromText} htmlFor="source-language">Translate from</label>
                             <select
+                                id="source-language"
                                 className={styles.languageSelectFrom}
                                 value={selectedLanguageFrom}
-                                onChange={event => setSelectedLanguageFrom(event.target.value)}
+                                disabled={isLoading}
+                                onChange={clearResultOnChange(setSelectedLanguageFrom)}
                             >
-                                {Object.keys(languages).map((key, index) => {
-                                    const language = languages[key];
-                                    return (
-                                        <option key={index} value={key}>{language.name}</option>
-                                    );
-                                })}
+                                {Object.entries(languages).map(([code, language]) => (
+                                    <option key={code} value={code}>{language.name}</option>
+                                ))}
                             </select>
-                            <GiSpeaker className={styles.audioIconFrom} onClick={() => readText("from")} />
-                            <CopyToClipboard text={inputText}>
-                                <FaCopy className={styles.copyIconFrom} />
+                            <IconButton
+                                type="button"
+                                className={styles.audioIconFrom}
+                                aria-label="Read source text aloud"
+                                title="Read source text aloud"
+                                disabled={!inputText || isLoading}
+                                onClick={() => readText('from')}
+                            >
+                                <GiSpeaker />
+                            </IconButton>
+                            <CopyToClipboard text={inputText} onCopy={() => toast.success('Source text copied.')}>
+                                <IconButton
+                                    type="button"
+                                    className={styles.copyIconFrom}
+                                    aria-label="Copy source text"
+                                    title="Copy source text"
+                                    disabled={!inputText || isLoading}
+                                >
+                                    <FaCopy />
+                                </IconButton>
                             </CopyToClipboard>
                         </div>
 
+                        <div className={styles.directionIcon} aria-hidden="true">
+                            <FaAngleDoubleRight />
+                        </div>
+
                         <div className={styles.rightSection}>
-                            <Typography className={styles.toText}>Select to language</Typography>
+                            <label className={styles.toText} htmlFor="target-language">Translate to</label>
                             <select
+                                id="target-language"
                                 className={styles.languageSelectTo}
                                 value={selectedLanguageTo}
-                                onChange={event => setSelectedLanguageTo(event.target.value)}
+                                disabled={isLoading}
+                                onChange={clearResultOnChange(setSelectedLanguageTo)}
                             >
-                                {Object.keys(languages).map((key, index) => {
-                                    const language = languages[key];
-                                    return (
-                                        <option key={index} value={key}>{language.name}</option>
-                                    );
-                                })}
+                                {Object.entries(languages).map(([code, language]) => (
+                                    <option key={code} value={code}>{language.name}</option>
+                                ))}
                             </select>
-                            <GiSpeaker className={styles.audioIconTo} onClick={() => readText("to")} />
-                            <CopyToClipboard text={outputText}>
-                                <FaCopy className={styles.copyIconTo} />
+                            <IconButton
+                                type="button"
+                                className={styles.audioIconTo}
+                                aria-label="Read translation aloud"
+                                title="Read translation aloud"
+                                disabled={!outputText || isLoading}
+                                onClick={() => readText('to')}
+                            >
+                                <GiSpeaker />
+                            </IconButton>
+                            <CopyToClipboard text={outputText} onCopy={() => toast.success('Translation copied.')}>
+                                <IconButton
+                                    type="button"
+                                    className={styles.copyIconTo}
+                                    aria-label="Copy translation"
+                                    title="Copy translation"
+                                    disabled={!outputText || isLoading}
+                                >
+                                    <FaCopy />
+                                </IconButton>
                             </CopyToClipboard>
                         </div>
                     </div>
+
                     <Button
                         type="submit"
                         variant="contained"
                         className={styles.translateButton}
-                        disabled={isLoading}
+                        disabled={isLoading || !inputText.trim()}
                     >
                         {isLoading
-                            ? <CircularProgress sx={{ padding: "10px" }} />
-                            : "Translate text"}
+                            ? <><CircularProgress size={18} color="inherit" /> Translating…</>
+                            : 'Translate text'}
                     </Button>
                 </form>
-            </div>
-        </div>
-    )
-}
+            </section>
+        </main>
+    );
+};
 
-export default LanguageTranslator
-
+export default LanguageTranslator;
